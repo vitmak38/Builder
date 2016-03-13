@@ -1,0 +1,1758 @@
+<html>
+<head>
+<title>BUILDER</title>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+<script language="javascript" src="js/jquery.js"></script>
+    <script language="javascript" src="js/menu.js"></script>
+    <link rel="stylesheet" href="js/Style.css">
+    <link rel="stylesheet" href="js/StyleMenu.css">
+
+
+
+
+</head>
+<body>
+
+
+<div id="header">
+
+
+<div class="menu1">
+
+<fieldset>
+    <legend>Elements</legend>
+    <select id="elements" class="styled">
+        <option>-choose-</option>
+        <option disabled="disabled"></option>
+    </select>
+</fieldset>
+    <fieldset>
+        <legend>Execute</legend>
+   <button type="button" class="button" id="step">step</button>
+    <button type="button" class="button" id="reset">Reset</button>
+    </fieldset>
+    <fieldset>
+        <legend>Edit</legend>
+     <button type="button" class="button" id="undo">undo</button>
+     <button type="button" class="button" id="redo">redo</button>
+    <button type="button" class="button2" id="project">save/load</button>
+    </fieldset>
+</div>
+	<div id="debug">
+</div>
+</div>
+
+<div id="container">
+	
+</div>
+
+<script>
+
+$(document).ready(
+	function() {
+		$.builder = {
+			makeElement: function(elName) {
+				var el = $.builder.construct[elName];
+				
+				this.name = elName;
+				this.outputCache = [];
+				this.inputCache = [];
+				this.readTimeout = null;
+				this.writeTimeout = null;
+				this.inputsTimeout = el.inputsTimeout;
+				
+				this.inputs = [];
+				for(i=0; i<el.inputsOffsets.length; i++) {
+					this.inputs[i] = new $.builder.makeElementInput(0);
+				}
+				
+				this.outputs = [];
+				for(i=0; i<el.outputsOffsets.length; i++) {
+					this.outputs[i] = new $.builder.makeElementOutput(0);
+				}
+				
+				this.eventHandler = el.eventHandler;
+				
+				this.setInputValue = function(i, newValue) {
+					var oldValue = this.inputs[i].value;
+					
+					if(oldValue != newValue) {
+						this.inputs[i].value = newValue;
+						this.eventHandler(i);
+						this.inputCache[this.inputCache.length] = i;
+					}
+					
+					this.colorInput(i);
+				};
+				
+				this.switchInputValue = function(i) {
+					var oldValue = this.inputs[i].value;
+					this.inputs[i].value = $.builder.std._not(oldValue);
+					this.eventHandler(i);
+					this.colorInput(i);
+					this.inputCache[this.inputCache.length] = i;
+					return this.inputs[i].value;
+				};
+				
+				this.setOutputValue = function(i, newValue) {
+					this.outputCache[this.outputCache.length] = [i, newValue];
+					var el = this;
+					
+					if(!this.readTimeout) {
+						this.readTimeout = setTimeout(
+							function() {
+								el.setOutputsAfterTimeout();
+								el.readTimeout = null;
+							}, $.workspace.readTime*$.workspace.timeScale
+						);
+					}
+				};
+				
+				this.setOutputsAfterTimeout = function() {
+					var minTime = undefined, i=0, el = this;
+					
+					if(this.writeTimeout) {
+						clearTimeout(this.writeTimeout);
+					}
+					
+					for(i=0; i<this.inputCache.length; i++) {
+						if(this.inputsTimeout[this.inputCache[i]] < minTime || minTime == undefined) {
+							minTime = this.inputsTimeout[this.inputCache[i]];
+						}
+					}
+					
+					minTime *= $.workspace.timeScale;
+					
+					this.writeTimeout = setTimeout(
+						function() {
+							var i;
+							for(i=0; i<el.outputCache.length; i++) {
+								el.setOutputValueReal(el.outputCache[i][0], el.outputCache[i][1]);
+							}
+							
+							el.inputCache = [];
+							el.outputCache = [];
+							el.writeTimeout = null;
+						}, minTime
+					);
+				}
+				
+				this.setOutputValueReal = function(i, newValue) {
+					var j=0;
+					var oldValue = this.outputs[i].value;
+					this.outputs[i].value = newValue;
+					this.colorOutput(i);
+					
+					for(j=0; j<this.outputs[i].links.length; j++) {
+						if(!this.outputs[i].links[j].removed && this.outputs[i].links[j].destination) {
+							this.outputs[i].links[j].destination.setInputValue(this.outputs[i].links[j].input, newValue);
+						}
+					}
+				};
+				
+				this.colorInput = function(i) {
+					if(!this.htmlElement) {
+						return false;
+					}
+					
+					if(this.inputs[i].value) {
+						$(this.htmlElement.children('.input')[i]).addClass('positive');
+					} else {
+						$(this.htmlElement.children('.input')[i]).removeClass('positive');
+					}
+					
+					return true;
+				}
+				
+				this.colorOutput = function(i) {
+					if(!this.htmlElement) {
+						return false;
+					}
+					
+					if(this.outputs[i].value) {
+						$(this.htmlElement.children('.output')[i]).addClass('positive');
+					} else {
+						$(this.htmlElement.children('.output')[i]).removeClass('positive');
+					}
+					
+					return true;
+				}
+				
+				this.makeLink = function(data) {
+					var i=data[0].output[1], j=0;
+					var destElement = data[0].input[0];
+					var destInput = data[0].input[1];
+					
+					this.outputs[i].links[this.outputs[i].links.length] = {
+						source: data[0].output[0],
+						output: i,
+						destination: destElement,
+						input: destInput,
+						data: data
+					};
+					destElement.setInputValue(destInput, this.outputs[i].value);
+					$.workspace.links[$.workspace.links.length] = this.outputs[i].links[this.outputs[i].links.length-1];
+					
+					for(j=0; j<$.workspace.links[$.workspace.links.length-1].data.length; j++) {
+						if($.workspace.links[$.workspace.links.length-1].data[j].htmlElement) {
+							$.workspace.links[$.workspace.links.length-1].data[j].htmlElement.data({link: this.outputs[i].links[this.outputs[i].links.length-1]});
+						}
+					}
+				};
+				
+				this.remove = function() {
+					var i=0, j=0;
+					
+					this.eventHandler = function(target) {
+						var i=0;
+						
+						for(i=0; i<this.inputs.length; i++) {
+							this.setInputValue(i, 0);
+						}
+						
+						for(i=0; i<this.outputs.length; i++) {
+							this.setOutputValue(i, 0);
+						}
+					}
+					
+					this.eventHandler(false);
+					
+					this.removed = true;
+					this.htmlElement.remove();
+					
+					for(i=0; i<this.outputs.length; i++) {
+						for(j=0; j<this.outputs[i].links.length; j++) {
+							$.links.removeLink(this.outputs[i].links[j]);
+						}
+					}
+
+				}
+				
+				for(i=0; i<this.inputs.length; i++) {
+					this.setInputValue(i, 1);
+				}
+				
+				for(i=0; i<this.inputs.length; i++) {
+					this.setInputValue(i, 0);
+				}
+				
+				this.eventHandler();
+			},
+			std: {
+				_and: function(arInput) {
+					for(i in arInput) {
+						if(!arInput[i].value) {
+							return 0;
+						}
+					}
+					
+					return 1;
+				},
+				_or: function(arInput) {
+					for(i in arInput) {
+						if(arInput[i].value) {
+							return 1;
+						}
+					}
+					
+					return 0;
+				},
+				_not: function(value) {
+					return value ? 0 : 1;
+				},
+				_inc: function(arNumber, base) {
+					var maxVal = Math.pow(2, arNumber.length);
+					var decVal=0;
+					var i=0;
+					
+					for(i=0; i<arNumber.length; i++) {
+						decVal += arNumber[i].value*Math.pow(2, i);
+					}
+					
+					decVal++;
+					
+					if(decVal>base-1) {
+						decVal = 0;
+					}
+					
+					for(i=0; i<arNumber.length; i++) {
+						modulo = decVal%2;
+						decVal = parseInt(decVal/2);
+						arNumber[i].value = modulo;
+					}
+					
+					return arNumber;
+				},
+				_dec: function(arNumber, base) {
+					var maxVal = Math.pow(2, arNumber.length);
+					var decVal=0;
+					var i=0;
+					
+					for(i=0; i<arNumber.length; i++) {
+						decVal += arNumber[i].value*Math.pow(2, i);
+					}
+					
+					decVal--;
+					
+					if(decVal<0) {
+						decVal = base-1;
+					}
+					
+					for(i=0; i<arNumber.length; i++) {
+						modulo = decVal%2;
+						decVal = parseInt(decVal/2);
+						arNumber[i].value = modulo;
+					}
+					
+					return arNumber;
+				}
+			},
+			makeElementInput: function(value) {
+				this.value = value;
+			},
+			makeElementOutput: function(value) {
+				this.value = value;
+				this.links = [];
+			},
+			categories: {
+				l: 'Elements',
+				r: 'Resistor',
+				c: '1',
+				s: '2',
+				d: '3',
+				e: '4'
+			},
+			construct: {
+				'la3': {
+					name: 'VT',
+					cat: 'l',
+					width: 32,
+					height: 27,
+					inputsOffsets: [0],
+					outputsOffsets: [-0.4, 0.4],
+					inputsTimeout: [100, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+                        var i, j;
+
+                        if(target && target.action == 'step') {
+                            if(target.pointer == 0) {
+                                var pointer = 15;
+                            } else {
+                                var pointer = target.pointer-1;
+                            }
+
+                            for(i=0; i<16; i++) {
+                                var newStr = '';
+
+                                for(j=0; j<pointer; j++) {
+                                    newStr += this.logs[i][j];
+                                }
+
+                                newStr += this.inputs[i].value;
+
+                                for(j=pointer+1; j<16; j++) {
+                                    newStr += this.logs[i][j];
+                                }
+
+                                this.logs[i] = newStr;
+                            }
+                            //console.log(this.logs);
+                        } else if(!this.logs) {
+                            this.logs = [];
+
+                            for(i=0; i<16; i++) {
+                                this.logs[i] = '0000000000000000';
+                            }
+                        }
+                    }
+				},
+				'll1': {
+					name: 'VD',
+					cat: 'l',
+					width: 34,
+					height: 27,
+					inputsOffsets: [0],
+					outputsOffsets: [0],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+                        var i, j;
+
+                        if(target && target.action == 'step') {
+                            if(target.pointer == 0) {
+                                var pointer = 15;
+                            } else {
+                                var pointer = target.pointer-1;
+                            }
+
+                            for(i=0; i<16; i++) {
+                                var newStr = '';
+
+                                for(j=0; j<pointer; j++) {
+                                    newStr += this.logs[i][j];
+                                }
+
+                                newStr += this.inputs[i].value;
+
+                                for(j=pointer+1; j<16; j++) {
+                                    newStr += this.logs[i][j];
+                                }
+
+                                this.logs[i] = newStr;
+                            }
+                            //console.log(this.logs);
+                        } else if(!this.logs) {
+                            this.logs = [];
+
+                            for(i=0; i<16; i++) {
+                                this.logs[i] = '0000000000000000';
+                            }
+                        }
+                    }
+				},
+				'le1': {
+					name: 'VA',
+					cat: 'l',
+					width: 90,
+					height: 240,
+					inputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					outputsOffsets: [0.5, 2.5, 4.5, 6.5],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i=0;
+						for(i=0; i<this.inputs.length/2; i++) {
+							this.setOutputValue(i, $.builder.std._not($.builder.std._or([this.inputs[2*i], this.inputs[2*i+1]])));
+						}
+					}
+				},
+				'li1': {
+					name: 'R',
+					cat: 'r',
+					width: 83,
+					height: 33,
+					inputsOffsets: [0],
+					outputsOffsets: [0],
+					inputsTimeout: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+					eventHandler: function(target) {
+                        var i, j;
+
+                        if(target && target.action == 'step') {
+                            if(target.pointer == 0) {
+                                var pointer = 15;
+                            } else {
+                                var pointer = target.pointer-1;
+                            }
+
+                            for(i=0; i<16; i++) {
+                                var newStr = '';
+
+                                for(j=0; j<pointer; j++) {
+                                    newStr += this.logs[i][j];
+                                }
+
+                                newStr += this.inputs[i].value;
+
+                                for(j=pointer+1; j<16; j++) {
+                                    newStr += this.logs[i][j];
+                                }
+
+                                this.logs[i] = newStr;
+                            }
+                            //console.log(this.logs);
+                        } else if(!this.logs) {
+                            this.logs = [];
+
+                            for(i=0; i<16; i++) {
+                                this.logs[i] = '0000000000000000';
+                            }
+                        }
+					}
+				},
+                /*'outputs': {
+                 name: 'outputs',
+                 cat: 'e',
+                 width: 128,
+                 height: 480,
+                 inputsOffsets: [0],
+                 outputsOffsets: [0],
+                 inputsTimeout: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                 eventHandler: function(target) {
+                 var i, j;
+
+                 if(target && target.action == 'step') {
+                 if(target.pointer == 0) {
+                 var pointer = 15;
+                 } else {
+                 var pointer = target.pointer-1;
+                 }
+
+                 for(i=0; i<16; i++) {
+                 var newStr = '';
+
+                 for(j=0; j<pointer; j++) {
+                 newStr += this.logs[i][j];
+                 }
+
+                 newStr += this.inputs[i].value;
+
+                 for(j=pointer+1; j<16; j++) {
+                 newStr += this.logs[i][j];
+                 }
+
+                 this.logs[i] = newStr;
+                 }
+                 //console.log(this.logs);
+                 } else if(!this.logs) {
+                 this.logs = [];
+
+                 for(i=0; i<16; i++) {
+                 this.logs[i] = '0000000000000000';
+                 }
+                 }
+                 }
+                 },*/
+				'ie6': {
+					name: 'V6',
+					cat: 'c',
+					width: 180,
+					height: 240,
+					inputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					outputsOffsets: [0, 1, 2, 3, 6, 7],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i=0;
+						
+						arInput = [];
+						
+						for(i=0; i<4; i++) {
+							arInput[i] = this.outputs[i];
+						}
+						
+						if(this.inputs[5].value) {
+							for(i=0; i<4; i++) {
+								this.setOutputValue(i, 0);
+							}
+							
+							this.setOutputValue(4, 1);
+							this.setOutputValue(5, 0);
+							
+							return 0;
+						}
+						
+						if(!this.inputs[4].value) {
+							for(i=0; i<4; i++) {
+								this.setOutputValue(i, this.inputs[i].value);
+							}
+							
+							this.setOutputValue(4, $.builder.std._not($.builder.std._and(arInput)));
+							this.setOutputValue(5, $.builder.std._or(arInput));
+							
+							return 0;
+						}
+						
+						if(target == 6) {
+							if(this.inputs[6].value && this.inputs[7].value) {
+								$.builder.std._inc(arInput, 10);
+								
+								for(i=0; i<4; i++) {
+									this.setOutputValue(i, this.outputs[i].value);
+								}
+								
+								this.setOutputValue(4, 1);
+								this.setOutputValue(5, 1);
+							} else if($.builder.std._and(arInput)) {
+								this.setOutputValue(4, 0);
+							}
+							
+							return 0;
+						} else if(target == 7) {
+							if(this.inputs[7].value && this.inputs[6].value) {
+								$.builder.std._dec(arInput, 10);
+								
+								for(i=0; i<4; i++) {
+									this.setOutputValue(i, this.outputs[i].value);
+								}
+								
+								this.setOutputValue(4, 1);
+								this.setOutputValue(5, 1);
+							} else if(!$.builder.std._or(arInput)) {
+								this.setOutputValue(5, 0);
+							}
+							
+							return 0;
+						}
+						
+						this.setOutputValue(4, 1);
+						this.setOutputValue(5, $.builder.std._or(arInput));
+						
+						return 0;
+					}
+				},
+				'ie7': {
+					name: 'V7',
+					cat: 'c',
+					width: 180,
+					height: 240,
+					inputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					outputsOffsets: [0, 1, 2, 3, 6, 7],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i=0;
+						
+						arInput = [];
+						
+						for(i=0; i<4; i++) {
+							arInput[i] = this.outputs[i];
+						}
+						
+						if(this.inputs[5].value) {
+							for(i=0; i<4; i++) {
+								this.setOutputValue(i, 0);
+							}
+							
+							this.setOutputValue(4, 1);
+							this.setOutputValue(5, 0);
+							
+							return 0;
+						}
+						
+						if(!this.inputs[4].value) {
+							for(i=0; i<4; i++) {
+								this.setOutputValue(i, this.inputs[i].value);
+							}
+							
+							this.setOutputValue(4, $.builder.std._not($.builder.std._and(arInput)));
+							this.setOutputValue(5, $.builder.std._or(arInput));
+							
+							return 0;
+						}
+						
+						if(target == 6) {
+							if(this.inputs[6].value && this.inputs[7].value) {
+								$.builder.std._inc(arInput, 16);
+								
+								for(i=0; i<4; i++) {
+									this.setOutputValue(i, this.outputs[i].value);
+								}
+								
+								this.setOutputValue(4, 1);
+								this.setOutputValue(5, 1);
+							} else if($.builder.std._and(arInput)) {
+								this.setOutputValue(4, 0);
+							}
+							
+							return 0;
+						} else if(target == 7) {
+							if(this.inputs[7].value && this.inputs[6].value) {
+								$.builder.std._dec(arInput, 16);
+								
+								for(i=0; i<4; i++) {
+									this.setOutputValue(i, this.outputs[i].value);
+								}
+								
+								this.setOutputValue(4, 1);
+								this.setOutputValue(5, 1);
+							} else if(!$.builder.std._or(arInput)) {
+								this.setOutputValue(5, 0);
+							}
+							
+							return 0;
+						}
+						
+						this.setOutputValue(4, 1);
+						this.setOutputValue(5, $.builder.std._or(arInput));
+						
+						return 0;
+					}
+				},
+				'ir1': {
+					name: 'V1',
+					cat: 's',
+					width: 180,
+					height: 240,
+					inputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					outputsOffsets: [0, 1, 2, 3],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i=0;
+						
+						if(this.inputs[5].value && !this.inputs[4].value && target == 4) {
+							for(i=0; i<this.outputs.length; i++) {
+								this.setOutputValue(i, this.inputs[i].value);
+							}
+							
+							return 0;
+						}
+						
+						if(!this.inputs[5].value && !this.inputs[7].value && target == 7) {
+ 							this.setOutputValue(0, this.inputs[6].value);
+							
+							for(i=this.outputs.length-1; i>0; i--) {
+								this.setOutputValue(i, this.outputs[i-1].value);
+							}
+							
+							return 0;
+						}
+						
+						return 0;
+					}
+				},
+				'ir13': {
+					name: 'V13',
+					cat: 's',
+					width: 180,
+					height: 422,
+					inputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+					outputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i=0;
+						
+						if(!this.inputs[13].value) {
+							for(i=0; i<this.outputs.length; i++) {
+								this.setOutputValue(i, 0);
+							}
+							
+							return 0;
+						}
+						
+						if(this.inputs[10].value && this.inputs[11].value && this.inputs[12].value && target == 10) {
+							for(i=0; i<this.outputs.length; i++) {
+								this.setOutputValue(i, this.inputs[i+1].value);
+							}
+							
+							return 0;
+						}
+						
+						if(this.inputs[10].value && !this.inputs[11].value && this.inputs[12].value && target == 10 || !this.inputs[10].value && !this.inputs[11].value && !this.inputs[12].value && target == 12) {
+							for(i=1; i<this.outputs.length; i++) {
+								this.setOutputValue(i-1, this.outputs[i].value);
+							}
+							
+							this.setOutputValue(this.outputs.length-1, this.inputs[9].value);
+							
+							return 0;
+						}
+						
+						if(this.inputs[10].value && this.inputs[11].value && !this.inputs[12].value && target == 10 || !this.inputs[10].value && !this.inputs[11].value && !this.inputs[12].value && target == 11) {
+							this.setOutputValue(0, this.inputs[0].value);
+							
+							for(i=this.outputs.length-2; i>=0; i--) {
+								this.setOutputValue(i+1, this.outputs[i].value);
+							}
+							
+							return 0;
+						}
+						
+						return 0;
+					}
+				},
+				'tm2': {
+					name: 'V2',
+					cat: 'r',
+					width: 180,
+					height: 240,
+					inputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					outputsOffsets: [0, 1, 4, 5],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i, j;
+						
+						for(i=0; i<2; i++) {
+							if(!this.inputs[4*i+0].value && this.inputs[4*i+3].value) {
+								this.setOutputValue(2*i+0, 0);
+								this.setOutputValue(2*i+1, 1);
+							} else if(!this.inputs[4*i+3].value && this.inputs[4*i+0].value) {
+								this.setOutputValue(2*i+0, 1);
+								this.setOutputValue(2*i+1, 0);
+							} else if(!this.inputs[4*i+0].value && !this.inputs[4*i+3].value) {
+								this.setOutputValue(2*i+0, 1);
+								this.setOutputValue(2*i+1, 1);
+							} else if(target == 4*i+2 && this.inputs[4*i+2].value) {
+								if(this.inputs[4*i+1].value) {
+									this.setOutputValue(2*i+0, 1);
+									this.setOutputValue(2*i+1, 0);
+								} else {
+									this.setOutputValue(2*i+0, 0);
+									this.setOutputValue(2*i+1, 1);
+								}
+							}
+						}
+						
+						return 0;
+					}
+				},
+				'tm5': {
+					name: 'V5',
+					cat: 'r',
+					width: 180,
+					height: 182,
+					inputsOffsets: [0, 1, 2, 3, 4, 5],
+					outputsOffsets: [0, 1, 2, 3],
+					inputsTimeout: [10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i, j;
+						
+						for(i=0; i<2; i++) {
+							if(this.inputs[3*i+2].value) {
+								this.setOutputValue(2*i+0, this.inputs[3*i].value);
+								this.setOutputValue(2*i+1, this.inputs[3*i+1].value);
+							}
+						}
+						
+						return 0;
+					}
+				},
+				'tm8': {
+					name: 'V8',
+					cat: 'r',
+					width: 180,
+					height: 240,
+					inputsOffsets: [0, 1, 2, 3, 6, 7],
+					outputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					inputsTimeout: [10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i=0;
+						
+						if(!this.inputs[5].value) {
+							for(i=0; i<4; i++) {
+								this.setOutputValue(2*i, 0);
+								this.setOutputValue(2*i+1, 1);
+							}
+							
+							return 0;
+						}
+						
+						if(target == 4 && this.inputs[4].value) {
+							for(i=0; i<4; i++) {
+								this.setOutputValue(2*i, this.inputs[i].value);
+								this.setOutputValue(2*i+1, $.builder.std._not(this.inputs[i].value));
+							}
+							
+							return 0;
+						}
+						
+						return 0;
+					}
+				},
+				'id3': {
+					name: 'V3',
+					cat: 'd',
+					width: 180,
+					height: 480,
+					inputsOffsets: [0, 1, 2, 3, 14, 15],
+					outputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+					inputsTimeout: [10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i=0;
+						
+						for(i=0; i<this.outputs.length; i++) {
+							this.setOutputValue(i, 1);
+						}
+							
+						if(this.inputs[4].value || this.inputs[5].value) {
+							return 0;
+						}
+						
+						var num=0;
+						
+						for(i=0; i<4; i++) {
+							if(this.inputs[i].value) {
+								num += Math.pow(2, i);
+							}
+						}
+						
+						this.setOutputValue(num, 0);
+						
+						return 0;
+					}
+				},
+				'id4': {
+					name: 'V4',
+					cat: 'd',
+					width: 180,
+					height: 240,
+					inputsOffsets: [0, 1, 2, 3, 4, 5],
+					outputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					inputsTimeout: [10, 10, 10, 10, 10, 10, 10, 10],
+					eventHandler: function(target) {
+						var i, num=0;
+						
+						for(i=0; i<2; i++) {
+							if(this.inputs[i].value) {
+								num += Math.pow(2, i);
+							}
+						}
+						
+						for(i=0; i<this.outputs.length; i++) {
+							this.setOutputValue(i, 1);
+						}
+						
+						if(this.inputs[2].value && !this.inputs[3].value) {
+							this.setOutputValue(num, 0);
+						}
+						
+						if(!this.inputs[4].value && !this.inputs[5].value) {
+							this.setOutputValue(4+num, 0);
+						}
+						
+						return 0;
+					}
+				},
+				'inputs': {
+					name: 'IPR',
+					cat: 'c',
+					width: 128,
+					height: 240,
+					inputsOffsets: [],
+					outputsOffsets: [0, 1, 2, 3, 4, 5, 6, 7],
+					inputsTimeout: [],
+					eventHandler: function(target) {
+						var i=0;
+						
+						if(!this.pointer || this.pointer == 16) {
+							this.pointer = 0;
+						}
+						
+						if(!this.program) {
+							var firstStart = true;
+							this.program = [];
+						}
+						
+						for(i=0; i<16; i++) {
+							if(!this.program[i]) {
+								this.program[i] = '0000000000000000';
+							}
+							
+							this.setOutputValue(i, parseInt(this.program[i][this.pointer]));
+						}
+						
+						if(!firstStart) {
+							this.pointer++;
+						}
+						
+						return 0;
+					}
+				},
+				'outputs': {
+					name: 'VU',
+					cat: 'c',
+					width: 128,
+					height: 90,
+					inputsOffsets: [0, 1, 2],
+					outputsOffsets: [],
+					inputsTimeout: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+					eventHandler: function(target) {
+						var i, j;
+
+						if(target && target.action == 'step') {
+							if(target.pointer == 0) {
+								var pointer = 15;
+							} else {
+								var pointer = target.pointer-1;
+							}
+							
+							for(i=0; i<16; i++) {
+								var newStr = '';
+								
+								for(j=0; j<pointer; j++) {
+									newStr += this.logs[i][j];
+								}
+
+								newStr += this.inputs[i].value;
+
+								for(j=pointer+1; j<16; j++) {
+									newStr += this.logs[i][j];
+								}
+
+								this.logs[i] = newStr;
+							}
+							//console.log(this.logs);
+						} else if(!this.logs) {
+							this.logs = [];
+
+							for(i=0; i<16; i++) {
+								this.logs[i] = '0000000000000000';
+							}
+						}
+					}
+				},
+				'5v': {
+					name: '"1"',
+					cat: 'e',
+					width: 60,
+					height: 30,
+					inputsOffsets: [],
+					outputsOffsets: [0],
+					inputsTimeout: [],
+					eventHandler: function(target) {
+						this.setOutputValue(0, 1);
+						return 0;
+					}
+				}
+			},
+			makeHtmlElement: function(elName) {
+				$.workspace.newHtmlElement = $('<div />');
+				//console.log(elName, $.workspace.newHtmlElement);
+				$.workspace.newHtmlElement.attr('alt', elName).addClass(elName).addClass('element').css('display', 'none');
+				$.workspace.newHtmlElement.css('width', $.builder.construct[elName].width+'px').css('height', $.builder.construct[elName].height+'px')
+				$.workspace.newHtmlElement.css('background', 'url(images/'+elName+'.png)').appendTo($.workspace.container);
+				
+				if(elName == 'inputs') {
+					$.workspace.newHtmlElement.dblclick(
+						function() {
+							var i=0, j=0;
+							var html = '';
+							var el = $(this).data().element;
+							el.eventHandler();
+							el.pointer = 0;
+							
+							for(i=0; i<16; i++) {
+								html += el.program[i]+"\n";
+							}
+							
+							var program = window.open('', 'program', 'width=400,height=400');
+							$(program.document.body).html('');
+							var area = $('<textarea />').css('width', '360px').css('height', '330px').css('overflow', 'hidden').css('white-space', 'nowrap').css('line-height', '20px').css('padding-left', '20px').css('letter-spacing', '14px').css('display', 'block').attr('value', html).appendTo($(program.document.body)).focus().keyup(
+								function(e) {
+									var i, newStr='', val=$(this).attr('value'), cursor=this.selectionStart;
+									
+									if(e.keyCode == 48 || e.keyCode == 49) {
+										for(i=0; i<=val.length; i++) {
+											if(!(i == cursor) && val[i]) {
+												newStr += val[i];
+											}
+										}
+										
+										$(this).attr('value', newStr);
+										this.setSelectionRange(cursor, cursor);
+									}
+								}
+							);
+							var load = $('<button />').html('load').appendTo($(program.document.body)).click(
+								function() {
+									//alert('');
+									var newProgram = area.attr('value').split("\n");
+									
+									for(i=0; i<16; i++) {
+										var extLen = 16-newProgram[i].length;
+										
+										for(j=0; j<extLen; j++) {
+											newProgram[i] += '0';
+										}
+									}
+									
+									el.program = newProgram;
+									program.close();
+									$.workspace.makeBackup();
+								}
+							);
+						}
+					);
+				} else if(elName == 'outputs') {
+					$.workspace.newHtmlElement.dblclick(
+						function() {
+							var i=0;
+							var html = '';
+							var el = $(this).data().element;
+							
+							for(i=0; i<16; i++) {
+								html += el.logs[i]+"\n";
+							}
+							
+							var logs = window.open('', 'logs', 'width=400,height=400');
+							$(logs.document.body).html('');
+							var area = $('<textarea />').css('width', '360px').css('height', '330px').css('overflow', 'hidden').css('white-space', 'nowrap').css('line-height', '20px').css('padding-left', '20px').css('letter-spacing', '14px').css('display', 'block').attr('value', html).appendTo($(logs.document.body)).focus().click(
+								function() {
+									$(this).select();
+								}
+							);
+						}
+					);
+				}
+				
+				return $.workspace.newHtmlElement;
+			},
+			makeInOutPuts: function(newIndex, construct) {
+				for(i=0; i<construct.inputsOffsets.length; i++) {
+					$('<div />').addClass('input').attr('alt', i).css('top', $.workspace.netScale-4+$.workspace.netScale*2*construct.inputsOffsets[i]+'px').appendTo($.workspace.newHtmlElement).click(
+						function() {
+							if(!$.workspace.keyEvents.ctrl && !$.workspace.newLink) {
+								var el = $(this).parent().data().element;
+								var newValue = el.switchInputValue($(this).attr('alt'));
+							}
+						}
+					);
+				}
+				
+				for(i=0; i<construct.outputsOffsets.length; i++) {
+					var output = $('<div />').addClass('output').attr('alt', i).css('top', $.workspace.netScale-4+$.workspace.netScale*2*construct.outputsOffsets[i]+'px').css('left', (construct.width-6)+'px').appendTo($.workspace.newHtmlElement).click(
+						function() {
+							
+						}
+					);
+					
+					if($.workspace.elements[newIndex].outputs[i].value) {
+						output.addClass('positive');
+					}
+				}
+			},
+			logOutputs: function(el) {
+				for(i=0; i<el.outputs.length; i++) {
+					console.log(el.outputs[i]);
+				}
+			}
+		};
+		
+		$.workspace = {
+			container: $('#container'),
+			offset: $('#container').offset(),
+			elements: [],
+			links: [],
+			newHtmlElement: false,
+			newLink: false,
+			netScale: 15,
+			lastId: 0,
+			readTime: 5,
+			timeScale: 2,
+			getPointX: function(x) {
+				return Math.round((x-$.workspace.offset.left)/$.workspace.netScale)*$.workspace.netScale+$.workspace.offset.left;
+			},
+			getPointY: function(y) {
+				return Math.round((y-$.workspace.offset.top)/$.workspace.netScale)*$.workspace.netScale+$.workspace.offset.top;
+			},
+			keyEvents: {
+				ctrl: false,
+				escape: false,
+			},
+			backup: [],
+			backupPointer: 0,
+			makeBackup: function() {
+				var i, j, k, l, buf;
+				
+				for(i=5; i>0; i--) {
+					if(!this.backup[i-1]) {
+						continue;
+					}
+					
+					this.backup[i] = this.backup[i-1];
+				}
+				
+				this.backup[0] = [];
+				
+				for(i=0; i<this.elements.length; i++) {
+					if(!this.elements[i].removed) {
+						var newI = this.backup[0].length;
+						this.backup[0][newI] = {
+							id: this.elements[i].id,
+							name: this.elements[i].name,
+							x: parseInt(this.elements[i].htmlElement.css('left'))-$.workspace.offset.left,
+							y: parseInt(this.elements[i].htmlElement.css('top'))-$.workspace.offset.top,
+							links: []
+						};
+						
+						if(this.elements[i].program) {
+							this.backup[0][newI].program = this.elements[i].program;
+						}
+						
+						for(j=0; j<this.elements[i].outputs.length; j++) {
+							for(k=0; k<this.elements[i].outputs[j].links.length; k++) {
+								if(!this.elements[i].outputs[j].links[k].removed) {
+									this.backup[0][newI].links[this.backup[0][newI].links.length] = {
+										output: j,
+										destination: this.elements[i].outputs[j].links[k].destination.id,
+										input: this.elements[i].outputs[j].links[k].input,
+										data: [],
+									};
+									
+									for(l=0; l<this.elements[i].outputs[j].links[k].data.length; l++) {
+										this.backup[0][newI].links[this.backup[0][newI].links.length-1].data[l] = {
+											x: this.elements[i].outputs[j].links[k].data[l].x,
+											y: this.elements[i].outputs[j].links[k].data[l].y,
+											type: this.elements[i].outputs[j].links[k].data[l].type
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				
+				this.backupPointer = 0;
+				
+				return this.backup[0];
+			},
+			restoreFromBackup: function(i) {
+				var backup = $.workspace.backup[i], j=0;
+				
+				$.workspace.elements = [];
+				$.workspace.links = [];
+				$.workspace.container.children().remove();
+				$.workspace.newHtmlElement = false;
+				$.workspace.newLink = false;
+				$.workspace.lastId = 0;
+				
+				for(i=0; i<backup.length; i++) {
+					var el = new $.builder.makeElement(backup[i].name);
+					var htmlEl = $.builder.makeHtmlElement(backup[i].name);
+					htmlEl.css('top', backup[i].y+$.workspace.offset.top).css('left', backup[i].x+$.workspace.offset.left).css('display', 'block');
+					htmlEl.data({element: el});
+					el.id = backup[i].id;
+					
+					if(el.id > $.workspace.lastId) {
+						$.workspace.lastId = el.id;
+					}
+					
+					el.htmlElement = $.workspace.newHtmlElement;
+					
+					if(backup[i].program) {
+						el.program = backup[i].program;
+					}
+					
+					var newIndex = $.workspace.elements.length;
+					var construct = $.builder.construct[el.name];
+					$.workspace.elements[newIndex] = el;
+					$.builder.makeInOutPuts(newIndex, construct);
+					
+					backup[i].el = el;
+					
+					$.workspace.newHtmlElement = false;
+				}
+				
+				for(i=0; i<backup.length; i++) {
+					for(j=0; j<backup[i].links.length; j++) {
+						backup[i].links[j].data[0].input = [$.workspace.getElementById(backup[i].links[j].destination), backup[i].links[j].input];
+						backup[i].links[j].data[0].output = [backup[i].el, backup[i].links[j].output];
+						
+						$.workspace.newLink = backup[i].links[j].data;
+						
+						var e = {
+							pageX: backup[i].links[j].data[backup[i].links[j].data.length-1].x+$.workspace.offset.left,
+							pageY: backup[i].links[j].data[backup[i].links[j].data.length-1].y+$.workspace.offset.top
+						}
+						
+						$.links.makeLink(e);
+						$.links.endLink(e);
+						
+						//backup[i].el.makeLink(backup[i].links[j].data);
+						
+						$.workspace.newLink = false;
+					}
+				}
+				
+				for(i=0; i<backup.length; i++) {
+					if(backup[i].el) {
+						delete backup[i].el;
+					}
+					
+					for(j=0; j<backup[i].links.length; j++) {
+						backup[i].links[j].data[0].input = [];
+						backup[i].links[j].data[0].output = [];
+					}
+				}
+			},
+			getElementById: function(id) {
+				var i=0;
+				
+				for(i=0; i<$.workspace.elements.length; i++) {
+					if($.workspace.elements[i].id == id) {
+						return $.workspace.elements[i];
+					}
+				}
+				
+				return false;
+			}
+		};
+		
+		$.workspace.container.mousemove(
+			function(e) {
+				var offset = $(this).offset();
+				var relativeX = (e.pageX - offset.left);
+				var relativeY = (e.pageY - offset.top);
+				
+				if($.workspace.newHtmlElement) {
+					var left = $.workspace.getPointX(e.pageX);
+					var top = $.workspace.getPointY(e.pageY);
+					$.workspace.newHtmlElement.css('display', 'block').css('top', top+'px').css('left', left+'px');
+				}
+				
+				if($.workspace.newLink) {
+					$.links.makeLink(e);
+				}
+			}
+		);
+		
+		$.workspace.container.click(
+			function(e) {
+				if($.workspace.newHtmlElement) {
+					var newIndex = $.workspace.elements.length;
+					$.workspace.elements[newIndex] = new $.builder.makeElement($.workspace.newHtmlElement.attr('alt'));
+					$.workspace.lastId++;
+					$.workspace.elements[newIndex].id = $.workspace.lastId;
+					/*$.workspace.elements[newIndex].place = {
+						x: [parseInt($.workspace.newHtmlElement.css('left'))-$.workspace.offset.left, parseInt($.workspace.newHtmlElement.css('left'))+parseInt($.workspace.newHtmlElement.css('width'))-$.workspace.offset.left],
+						y: [parseInt($.workspace.newHtmlElement.css('top'))-$.workspace.offset.top, parseInt($.workspace.newHtmlElement.css('top'))+parseInt($.workspace.newHtmlElement.css('height'))-$.workspace.offset.top]
+					};*/
+					
+					$.workspace.elements[newIndex].htmlElement = $.workspace.newHtmlElement;
+					
+					$.workspace.newHtmlElement.data({element: $.workspace.elements[newIndex]});
+					
+					var i=0;
+					var construct = $.builder.construct[$.workspace.newHtmlElement.attr('alt')];
+					
+					$.builder.makeInOutPuts(newIndex, construct);
+					
+					$.workspace.newHtmlElement = false;
+					
+					$.workspace.makeBackup();
+				} else {
+					if($.workspace.keyEvents.ctrl && !$.workspace.newLink && $(e.target).hasClass('input') || $(e.target).hasClass('output') && !$.workspace.newLink) {
+						$.links.beginLink(e);
+						
+						if($(e.target).hasClass('input')) {
+							$.workspace.newLink[0].input = [$(e.target).parent().data().element, $(e.target).attr('alt')];
+						} else if($(e.target).hasClass('output')) {
+							$.workspace.newLink[0].output = [$(e.target).parent().data().element, $(e.target).attr('alt')];
+						}
+					} else if($.workspace.newLink) {
+						if($(e.target).hasClass('input')) {
+							$.workspace.newLink[0].input = [$(e.target).parent().data().element, $(e.target).attr('alt')];
+						} else if($(e.target).hasClass('output')) {
+							$.workspace.newLink[0].output = [$(e.target).parent().data().element, $(e.target).attr('alt')];
+						}
+						
+						if($(e.target).hasClass('input') || $(e.target).hasClass('output')) {
+							$.links.endLink(e);
+							$.workspace.makeBackup();
+						} else {
+							$.links.turnLink(e);
+						}
+					} else if($(e.target).hasClass('element')) {
+						if(!$.workspace.keyEvents.ctrl) {
+							$('.selectedElement').removeClass('selectedElement');
+							$('.selectedLink').removeClass('selectedLink');
+						}
+						
+						if($(e.target).hasClass('selectedElement')) {
+							$(e.target).removeClass('selectedElement');
+						} else {
+							$(e.target).addClass('selectedElement');
+						}
+					} else if($(e.target).attr('id') == 'container') {
+						if(!$.workspace.keyEvents.ctrl) {
+							$('.selectedElement').removeClass('selectedElement');
+							$('.selectedLink').removeClass('selectedLink');
+						}
+					}
+					if($(e.target).hasClass('link')) {
+						if(!$.workspace.keyEvents.ctrl) {
+							$('.selectedElement').removeClass('selectedElement');
+							$('.selectedLink').removeClass('selectedLink');
+						}
+						
+						if($(e.target).hasClass('selectedLink')) {
+							var link = $(e.target).data().link.data;
+							for(i=0; i<link.length; i++) {
+								if(link[i].htmlElement) {
+									link[i].htmlElement.removeClass('selectedLink');
+								}
+							}
+						} else if($(e.target).data().link && $(e.target).data().link.data && !$.workspace.newLink) {
+							var link = $.map($(e.target).data().link.data, function(k, v) {
+								return [k];
+							});
+							
+							for(i=0; i<link.length; i++) {
+								if(link[i].htmlElement) {
+									link[i].htmlElement.addClass('selectedLink');
+								}
+							}
+						}
+					}
+				}
+			}
+		);
+		
+		$.links = {
+			stepSize: 20,
+			beginLink: function(e) {
+				$.workspace.newLink = [
+					{
+						x: $.workspace.getPointX(e.pageX)-$.workspace.offset.left,
+						y: $.workspace.getPointY(e.pageY)-$.workspace.offset.top,
+						type: 'h'
+					},
+					{
+						x: $.workspace.getPointX(e.pageX)-$.workspace.offset.left,
+						y: $.workspace.getPointY(e.pageY)-$.workspace.offset.top,
+						type: 'v'
+					}
+				];
+			},
+			turnLink: function(e) {
+				var i=0;
+				
+				for(i=0; i<$.workspace.newLink.length; i++) {
+					$.workspace.newLink[i].temp = false;
+				}
+				
+				if($.workspace.newLink[$.workspace.newLink.length-1].type == 'h') {
+					$.workspace.newLink[$.workspace.newLink.length] = {
+						x: $.workspace.getPointX(e.pageX)-$.workspace.offset.left,
+						y: $.workspace.newLink[$.workspace.newLink.length-1].y,
+						type: 'v'
+					}
+				} else {
+					$.workspace.newLink[$.workspace.newLink.length] = {
+						x: $.workspace.newLink[$.workspace.newLink.length-1].x,
+						y: $.workspace.getPointY(e.pageY)-$.workspace.offset.top,
+						type: 'h'
+					}
+				}
+			},
+			makeLink: function(e) {
+				var newLink = [];
+				
+				for(i=0; i<$.workspace.newLink.length; i++) {
+					var link = $.workspace.newLink[i];
+					
+					if(link.htmlElement) {
+						link.htmlElement.remove();
+					}
+					
+					if(!link.temp) {
+						newLink[newLink.length] = link;
+					}
+				}
+				
+				$.workspace.newLink = newLink;
+				
+				if($.workspace.getPointY(e.pageY)-($.workspace.newLink[$.workspace.newLink.length-1].y+$.workspace.offset.top) != 0) {
+					var oldX = $.workspace.newLink[$.workspace.newLink.length-2].x;
+					var newX = $.workspace.getPointX(e.pageX)-$.workspace.offset.left;
+					var oldY = $.workspace.newLink[$.workspace.newLink.length-2].y;
+					var newY = $.workspace.getPointY(e.pageY)-$.workspace.offset.top;
+					var xMiddle = $.workspace.getPointX((newX+oldX)/2+$.workspace.offset.left)-$.workspace.offset.left;
+					var yMiddle = $.workspace.getPointY((newY+oldY)/2+$.workspace.offset.top)-$.workspace.offset.top;
+					
+					if($.workspace.newLink[$.workspace.newLink.length-1].type == 'v') {
+						$.workspace.newLink[$.workspace.newLink.length-1].x = xMiddle;
+						
+						$.workspace.newLink[$.workspace.newLink.length] = {
+							x: xMiddle,
+							y: newY,
+							type: 'h',
+							temp: true
+						};
+						$.workspace.newLink[$.workspace.newLink.length] = {
+							x: newX,
+							y: newY,
+							type: 'v',
+							temp: true
+						};
+					} else {
+						$.workspace.newLink[$.workspace.newLink.length-1].y = yMiddle;
+						
+						$.workspace.newLink[$.workspace.newLink.length] = {
+							x: newX,
+							y: yMiddle,
+							type: 'v',
+							temp: true
+						};
+						$.workspace.newLink[$.workspace.newLink.length] = {
+							x: newX,
+							y: newY,
+							type: 'h',
+							temp: true
+						};
+					}
+				} else if($.workspace.newLink[$.workspace.newLink.length-1].type == 'v') {
+					$.workspace.newLink[$.workspace.newLink.length-1].x = $.workspace.getPointX(e.pageX)-$.workspace.offset.left;
+				} else if($.workspace.getPointY(e.pageY)-($.workspace.newLink[$.workspace.newLink.length-2].y+$.workspace.offset.top) == 0) {
+					$.workspace.newLink[$.workspace.newLink.length-2].x = $.workspace.getPointX(e.pageX)-$.workspace.offset.left;
+					$.workspace.newLink[$.workspace.newLink.length-1].x = $.workspace.getPointX(e.pageX)-$.workspace.offset.left;
+				} else if($.workspace.getPointY(e.pageY)-($.workspace.newLink[$.workspace.newLink.length-1].y+$.workspace.offset.top) == 0) {
+					$.workspace.newLink[$.workspace.newLink.length] = {
+						x: $.workspace.getPointX(e.pageX)-$.workspace.offset.left,
+						y: $.workspace.newLink[$.workspace.newLink.length-1].y,
+						type: 'v',
+						temp: true
+					};
+				} else {
+					$.workspace.newLink[$.workspace.newLink.length-1].y = $.workspace.getPointY(e.pageY)-$.workspace.offset.top;
+				}
+				
+				var i=0;
+				
+				if($.workspace.newLink[$.workspace.newLink.length-1].type == 'v') {
+					$.workspace.newLink[$.workspace.newLink.length-1].x = $.workspace.getPointX(e.pageX)-$.workspace.offset.left;
+				} else {
+					$.workspace.newLink[$.workspace.newLink.length-1].y = $.workspace.getPointY(e.pageY)-$.workspace.offset.top;
+				}
+				
+				//console.log($.workspace.newLink[$.workspace.newLink.length-1]);
+				
+				for(i=0; i<$.workspace.newLink.length-1; i++) {
+					if($.workspace.newLink[i].type == 'h') {
+						var el = $('<div />').addClass('h-line').addClass('newLink').addClass('link').css('left', Math.min($.workspace.newLink[i].x, $.workspace.newLink[i+1].x)+$.workspace.offset.left).css('width', Math.abs($.workspace.newLink[i].x-$.workspace.newLink[i+1].x)).css('top', $.workspace.newLink[i].y+$.workspace.offset.top);
+					} else if($.workspace.newLink[i].type == 'v') {
+						var el = $('<div />').addClass('v-line').addClass('newLink').addClass('link').css('top', Math.min($.workspace.newLink[i].y, $.workspace.newLink[i+1].y)+$.workspace.offset.top).css('height', Math.abs($.workspace.newLink[i].y-$.workspace.newLink[i+1].y)).css('left', $.workspace.newLink[i].x+$.workspace.offset.left);
+					}
+					
+					$.workspace.newLink[i].htmlElement = el;
+					el.appendTo($.workspace.container);
+				}
+			},
+			endLink: function(e) {
+				$.workspace.newLink[0].output[0].makeLink($.workspace.newLink);
+				$.workspace.newLink = false;
+				$('.newLink').removeClass('newLink');
+			},
+			removeLink: function(link) {
+				var i=0;
+				
+				for(i=0; i<link.data.length; i++) {
+					if(link.data[i].htmlElement) {
+						link.data[i].htmlElement.remove();
+					}
+				}
+				
+				link.input = null;
+				link.output = null;
+				link.destination = null;
+				link.source = null;
+				link.data = null;
+				link.removed = true;
+				
+				//console.log(link);
+			}
+		};
+		
+		$('body').keydown(
+			function(e) {
+				if(e.keyCode == 17 || e.keyCode == 91) {
+					$.workspace.keyEvents.ctrl = true;
+				}
+				if(e.keyCode == 27) {
+					$.workspace.keyEvents.escape = true;
+				}
+				//console.log(e.keyCode);
+			}
+		);
+		
+		$('body').keyup(
+			function(e) {
+				if(e.keyCode == 17 || e.keyCode == 91) {
+					$.workspace.keyEvents.ctrl = false;
+				}
+				if(e.keyCode == 27) {
+					$.workspace.keyEvents.escape = false;
+				}
+				if(e.keyCode == 68) {
+					if($('.selectedElement').length) {
+						$('.selectedElement').each(
+							function() {
+								$(this).data().element.remove();
+							}
+						);
+						
+						$.workspace.makeBackup();
+					}
+					if($('.selectedLink').length) {
+						$('.selectedLink').each(
+							function() {
+								if($(this).data().link) {
+									$.links.removeLink($(this).data().link);
+								}
+							}
+						);
+						
+						$.workspace.makeBackup();
+					}
+				}
+			}
+		);
+		
+		setInterval(function() {
+			var i=0;
+			
+			if($.workspace.keyEvents.escape) {
+				if($.workspace.newHtmlElement) {
+					$.workspace.newHtmlElement.remove();
+					$.workspace.newHtmlElement = false;
+				} else if($.workspace.newLink && $.workspace.newLink.length) {
+					var newLink = [];
+					
+					if($.workspace.newLink[$.workspace.newLink.length-2] && $.workspace.newLink[$.workspace.newLink.length-2].htmlElement) {
+						$.workspace.newLink[$.workspace.newLink.length-2].htmlElement.remove();
+					}
+					
+					for(i=0; i<$.workspace.newLink.length-1; i++) {
+						newLink[i] = $.workspace.newLink[i];
+					}
+					
+					$.workspace.newLink = newLink;
+					
+					if($.workspace.newLink.length == 1) {
+						$.workspace.newLink = false;
+					}
+				}
+			}
+		}, 100);
+		
+		$.iface = {
+			step: function() {
+				var pointer;
+				
+				$('.inputs').each(
+					function() {
+						$(this).data().element.eventHandler(null);
+						pointer = $(this).data().element.pointer-1;
+						$('#step').attr('value', 'step '+(pointer));
+					}
+				);
+				
+				$('.outputs').each(
+					function() {
+						$(this).data().element.eventHandler(
+							{
+								action: 'step',
+								pointer: pointer
+							}
+						);
+					}
+				);
+			},
+			reset: function() {
+				$('.inputs').each(
+					function() {
+						$(this).data().element.pointer = -1;
+						$(this).data().element.eventHandler(null);
+						$('#step').attr('value', 'step');
+					}
+				);
+			},
+			menuMake: function() {
+				var i, j, arMenu = {};
+				
+				for(i in $.builder.categories) {
+					arMenu[$.builder.categories[i]] = {};
+					
+					for(j in $.builder.construct) {
+						if($.builder.construct[j].cat == i) {
+							arMenu[$.builder.categories[i]][j] = $.builder.construct[j];
+						}
+					}
+				}
+				
+				for(i in arMenu) {
+					$('<option />').attr('disabled', 'disabled').html(i).appendTo($('select#elements'));
+					
+					for(j in arMenu[i]) {
+						$('<option />').attr('value', j).html('&nbsp;&nbsp;&nbsp;'+$.builder.construct[j].name).appendTo($('select#elements'));
+					}
+					
+					$('<option />').attr('disabled', 'disabled').html('').appendTo($('select#elements'));
+				}
+			},
+			menuClick: function() {
+				var elName = $(this).attr('value');
+				$($(this).children()[0]).attr('selected', 'selected');
+				$.builder.makeHtmlElement(elName);
+			},
+			dynamic: function() {
+				if(!$(this).attr('checked')) {
+					clearInterval($.workspace.dynamic);
+				} else {
+					$.workspace.dynamic = setInterval($.iface.step, 800);
+				}
+			},
+			undo: function() {
+				if($.workspace.backup[$.workspace.backupPointer+1]) {
+					$.workspace.backupPointer++;
+					$.workspace.restoreFromBackup($.workspace.backupPointer);
+				}
+			},
+			redo: function() {
+				if($.workspace.backup[$.workspace.backupPointer-1]) {
+					$.workspace.backupPointer--;
+					$.workspace.restoreFromBackup($.workspace.backupPointer);
+				}
+			},
+			project: function() {
+				var backup = $.workspace.backup[0];
+				var resultBackup = [];
+				var i, j, k, l;
+				
+				if(backup && backup.length) {
+					for(i=0; i<backup.length; i++) {
+						resultBackup[i] = {
+							id: backup[i].id,
+							name: backup[i].name,
+							x: backup[i].x,
+							y: backup[i].y,
+							links: []
+						};
+						
+						if(backup[i].program) {
+							resultBackup[i].program = backup[i].program;
+						}
+						
+						for(j=0; j<backup[i].links.length; j++) {
+							resultBackup[i].links[j] = {
+								input: backup[i].links[j].input,
+								output: backup[i].links[j].output,
+								destination: backup[i].links[j].destination,
+								data: []
+							};
+							
+							for(k=0; k<backup[i].links[j].data.length; k++) {
+								resultBackup[i].links[j].data[k] = {
+									x: backup[i].links[j].data[k].x,
+									y: backup[i].links[j].data[k].y,
+									type: backup[i].links[j].data[k].type
+								}
+							}
+						}
+					}
+				}
+				
+				var save = window.open('', 'save', 'width=400,height=400');
+				$(save.document.body).html('');
+				
+				var area = $('<textarea />').css('width', '360px').css('height', '340px').css('display', 'block').attr('value', JSON.stringify(resultBackup)).appendTo($(save.document.body)).click(
+					function() {
+						this.select();
+					}
+				).focus().select();
+				var load = $('<button />').html('load').appendTo($(save.document.body)).click(
+					function() {
+						var backup = area.attr('value');
+						
+						if(backup && JSON.parse(backup)) {
+							$.workspace.backup[0] = JSON.parse(backup);
+							$.workspace.restoreFromBackup(0);
+						}
+						
+						save.close();
+					}
+				);
+			}
+		};
+		
+		$.iface.menuMake();
+		$('#elements').change($.iface.menuClick);
+		$('#step').click($.iface.step);
+		$('#reset').click($.iface.reset);
+		$('#dynamic').click($.iface.dynamic);
+		$('#undo').click($.iface.undo);
+		$('#redo').click($.iface.redo);
+		$('#project').click($.iface.project);
+		
+		$.workspace.makeBackup();
+	}
+);
+
+</script>
+</body>
+</html>

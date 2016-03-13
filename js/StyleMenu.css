@@ -1,0 +1,55 @@
+
+.checkbox, .radio {
+    width: 19px;
+    height: 25px;
+    padding: 0 5px 0 0;
+    background: url(http://yraaa.ru/_pu/5/25230809.gif) no-repeat;
+    display: block;
+    clear: left;
+    float: left;
+}
+.radio {
+    background: url(http://yraaa.ru/_pu/5/65600522.gif) no-repeat;
+}
+.select {
+    position: absolute;
+
+    width: 158px;
+    height: 21px;
+    padding: 0 24px 0 8px;
+    color: #fff;
+    font: 12px/21px arial,sans-serif;
+    background: url(../images/select.gif) no-repeat;
+    overflow: hidden;
+}
+.button{
+    position: static;
+
+    width: 48px;
+    height: 21px;
+    padding: 0 24px 0 8px;
+    color: #fff;
+    font: 12px/21px arial,sans-serif;
+    background: url(../images/button.gif) no-repeat;
+
+}
+.button2{
+    position: static;
+
+    width: 70px;
+    height: 21px;
+    padding: 0 24px 0 8px;
+    color: #fff;
+    font: 12px/21px arial,sans-serif;
+    background: url(../images/button.gif) no-repeat;
+
+}
+.menu1{
+    position: static;
+
+    display: inline;
+
+}
+ul.menu1 li{
+    display: inline;
+}
